@@ -410,26 +410,3 @@ pkill -f "node dist/apps" 2>/dev/null || true
 # Prune docker system (optional)
 docker system prune -af --volumes
 ```
-
-### Git Upload Preparation
-
-The project is ready to upload. All sensitive data (JWT_SECRET, DB passwords) should be set in `.env` and NOT committed to git. The `.dockerignore` file controls what's excluded from Docker builds.
-
-## Git Upload Instructions
-
-```bash
-# Initialize git repo
-git init
-
-# Add all files
-git add .
-
-# Create initial commit
-git commit -m "EventFlow NestJS Microservices - v12 with rspack, Drizzle, Kafka"
-
-# Add remote (replace with your repo)
-git remote add origin git@github.com:sawmikcuet19/nestjs-microservices.git
-
-# Push to main branch
-git push -u origin main
-```
