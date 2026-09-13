@@ -10,37 +10,40 @@ EventFlow is a complete NestJS v12 microservices application demonstrating event
 - **Redis** for caching and rate limiting
 - **MailHog** for email testing
 
-## Architecture Diagram (Mermaid)
+## Architecture Diagram
 
 ```mermaid
 flowchart TB
     subgraph Client ["Clients"]
         direction LR
-        A[HTTP Client] -->|REST API| G[API Gateway (3000)]
+        A["HTTP Client"] -->|"REST API"| G["API Gateway - 3000"]
     end
 
     subgraph Docker ["Docker Network"]
         direction TB
-        P[PostgreSQL (5432)] -->|SQL Queries| E[Events Service (3003)]
-        P -->|SQL Queries| T[Tickets Service (3004)]
-        P -->|SQL Queries| Auth[Auth Service (3001)]
-        N[Redis (6379)] -->|Cache/RateLimit| E
-        N -->|Cache/RateLimit| T
-        N -->|Cache/RateLimit| Auth
-        K[Kafka (9094)] -->|Publish/Subscribe| E
-        K -->|Publish/Subscribe| T
-        K -->|Publish/Subscribe| Auth
-        N2[MailHog (1025)] -->|Email| Auth
+        P["PostgreSQL - 5432"] -->|"SQL Queries"| E["Events Service - 3003"]
+        P -->|"SQL Queries"| T["Tickets Service - 3004"]
+        P -->|"SQL Queries"| Auth["Auth Service - 3001"]
+        N["Redis - 6379"] -->|"Cache"| E
+        N -->|"Cache"| T
+        N -->|"Cache"| Auth
+        K["Kafka - 9094"] -->|"Publish"| E
+        K -->|"Publish"| T
+        K -->|"Subscribe"| Auth
+        MH["MailHog - 1025"] -->|"SMTP"| Auth
     end
 
     subgraph Local ["Local Development"]
         direction TB
-        GW[API Gateway] -->|Proxies| Auth
-        GW -->|Proxies| Events
-        GW -->|Proxies| Tickets
-        Auth -->|DB & Kafka| P
-        Events -->|DB & Kafka| P
-        Tickets -->|DB & Kafka| P
+        GW["API Gateway"] -->|"Proxies"| Auth
+        GW -->|"Proxies"| E
+        GW -->|"Proxies"| T
+        Auth -->|"DB"| P
+        Auth -->|"Events"| K
+        E -->|"DB"| P
+        E -->|"Events"| K
+        T -->|"DB"| P
+        T -->|"Events"| K
     end
 
     style Client fill:#f9f,stroke:#333,stroke-width:2px
