@@ -10,45 +10,190 @@ EventFlow is a complete NestJS v12 microservices application demonstrating event
 - **Redis** for caching and rate limiting
 - **MailHog** for email testing
 
-## Architecture Diagram
+## Architecture Overview
 
 ```mermaid
-flowchart TB
-    subgraph Client ["Clients"]
-        direction LR
-        A["HTTP Client"] -->|"REST API"| G["API Gateway - 3000"]
+flowchart LR
+    Client["Client"] --> GW["API Gateway"]
+    GW --> Auth["Auth Service"]
+    GW --> Events["Events Service"]
+    GW --> Tickets["Tickets Service"]
+    Auth --> DB["PostgreSQL"]
+    Events --> DB
+    Tickets --> DB
+    Auth --> Kafka["Kafka"]
+    Events --> Kafka
+    Tickets --> Kafka
+    Kafka --> Notify["Notifications Service"]
+    Notify --> Email["MailHog SMTP"]
+```
+
+## Flow 1 - User Registration
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant GW as API Gateway
+    participant Auth as Auth Service
+    participant DB as PostgreSQL
+    participant Kafka as Kafka
+    participant Notify as Notifications
+    participant SMTP as MailHog
+
+    C->>GW: POST /auth/register
+    GW->>Auth: Forward request
+    Auth->>DB: INSERT user
+    DB-->>Auth: User created
+    Auth->>Kafka: Emit user.registered
+    Auth-->>GW: Return JWT + user
+    GW-->>C: 201 Created
+    Kafka->>Notify: Consume user.registered
+    Notify->>SMTP: Send welcome email
+    SMTP-->>Notify: Email sent
+```
+
+## Flow 2 - User Login
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant GW as API Gateway
+    participant Auth as Auth Service
+    participant DB as PostgreSQL
+
+    C->>GW: POST /auth/login
+    GW->>Auth: Forward request
+    Auth->>DB: SELECT user by email
+    DB-->>Auth: User record
+    Auth->>Auth: Verify password with bcrypt
+    Auth->>Auth: Sign JWT with role
+    Auth-->>GW: Return access_token + user
+    GW-->>C: 200 OK
+```
+
+## Flow 3 - Create and Publish Event
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant GW as API Gateway
+    participant Events as Events Service
+    participant DB as PostgreSQL
+    participant Kafka as Kafka
+
+    Note over C,Kafka: Create Event
+    C->>GW: POST /events (with JWT)
+    GW->>GW: Validate JWT, extract role
+    GW->>Events: Forward with x-user-id header
+    Events->>DB: INSERT event
+    DB-->>Event: Event created
+    Events->>Kafka: Emit event.created
+    Events-->>GW: Return event
+    GW-->>C: 201 Created
+
+    Note over C,Kafka: Publish Event
+    C->>GW: POST /events/:id/publish (with JWT)
+    GW->>Events: Forward with x-user-id, x-user-role
+    Events->>DB: UPDATE event SET status='PUBLISHED'
+    Events-->>GW: Return updated event
+    GW-->>C: 200 OK
+```
+
+## Flow 4 - Purchase Ticket
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant GW as API Gateway
+    participant Tickets as Tickets Service
+    participant DB as PostgreSQL
+    participant Kafka as Kafka
+    participant Notify as Notifications
+    participant SMTP as MailHog
+
+    C->>GW: POST /tickets/purchase (with JWT)
+    GW->>Tickets: Forward request
+    Tickets->>DB: SELECT event (check capacity)
+    DB-->>Tickets: Event data
+    Tickets->>Tickets: Check sold vs capacity
+    Tickets->>DB: INSERT ticket
+    DB-->>Tickets: Ticket created
+    Tickets->>Kafka: Emit ticket.purchased
+    Tickets-->>GW: Return ticket
+    GW-->>C: 201 Created
+    Kafka->>Notify: Consume ticket.purchased
+    Notify->>DB: SELECT user email by userId
+    Notify->>SMTP: Send confirmation email
+```
+
+## Flow 5 - Kafka Event-Driven Notifications
+
+```mermaid
+flowchart LR
+    subgraph Producers
+        A["Auth Service"] -->|"user.registered"| K["Kafka"]
+        B["Events Service"] -->|"event.created"| K
+        C["Tickets Service"] -->|"ticket.purchased"| K
+        D["Tickets Service"] -->|"ticket.cancelled"| K
     end
 
-    subgraph Docker ["Docker Network"]
-        direction TB
-        P["PostgreSQL - 5432"] -->|"SQL Queries"| E["Events Service - 3003"]
-        P -->|"SQL Queries"| T["Tickets Service - 3004"]
-        P -->|"SQL Queries"| Auth["Auth Service - 3001"]
-        N["Redis - 6379"] -->|"Cache"| E
-        N -->|"Cache"| T
-        N -->|"Cache"| Auth
-        K["Kafka - 9094"] -->|"Publish"| E
-        K -->|"Publish"| T
-        K -->|"Subscribe"| Auth
-        MH["MailHog - 1025"] -->|"SMTP"| Auth
+    subgraph Consumers
+        K --> N["Notifications Service"]
     end
 
-    subgraph Local ["Local Development"]
-        direction TB
-        GW["API Gateway"] -->|"Proxies"| Auth
-        GW -->|"Proxies"| E
-        GW -->|"Proxies"| T
-        Auth -->|"DB"| P
-        Auth -->|"Events"| K
-        E -->|"DB"| P
-        E -->|"Events"| K
-        T -->|"DB"| P
-        T -->|"Events"| K
+    subgraph Actions
+        N -->|"user.registered"| W["Welcome Email"]
+        N -->|"ticket.purchased"| TC["Ticket Confirmation"]
+        N -->|"ticket.cancelled"| TX["Ticket Cancellation"]
     end
 
-    style Client fill:#f9f,stroke:#333,stroke-width:2px
-    style Docker fill:#bbf,stroke:#333,stroke-width:2px
-    style Local fill:#cfc,stroke:#333,stroke-width:2px
+    style Producers fill:#e1f5fe,stroke:#0288d1
+    style Consumers fill:#f3e5f5,stroke:#7b1fa2
+    style Actions fill:#e8f5e9,stroke:#388e3c
+```
+
+## Database Schema
+
+```mermaid
+erDiagram
+    USERS {
+        uuid id PK
+        varchar email UK
+        varchar password
+        varchar name
+        varchar role
+        timestamp created_at
+        timestamp updated_at
+    }
+    EVENTS {
+        uuid id PK
+        varchar title
+        text description
+        timestamp date
+        varchar location
+        integer capacity
+        numeric price
+        varchar status
+        uuid organizer_id FK
+        timestamp created_at
+        timestamp updated_at
+    }
+    TICKETS {
+        uuid id PK
+        uuid event_id FK
+        uuid user_id FK
+        integer quantity
+        numeric total_price
+        varchar status
+        varchar ticket_code UK
+        timestamp purchased_at
+        timestamp checked_in_at
+        timestamp created_at
+    }
+
+    USERS ||--o{ EVENTS : "organizes"
+    USERS ||--o{ TICKETS : "purchases"
+    EVENTS ||--o{ TICKETS : "has"
 ```
 
 ## Project Structure
